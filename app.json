@@ -1,25 +1,27 @@
 {
   "expo": {
-    "name": "ccdr-relatorios",
+    "name": "CCDR Relatórios",
     "slug": "ccdr-relatorios",
     "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "ios": {
-      "supportsTablet": true
-    },
+    "icon": "./assets/icone-ccdr.png",
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/icone-ccdr.png",
+        "backgroundColor": "#ffffff"
       },
-      "predictiveBackGestureEnabled": false
+      "package": "com.joaofrancisco221.ccdrrelatorios"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-sharing"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f4bd417f-6f94-4792-8c70-1e1b986224fe"
+      }
     }
   }
 }
