@@ -73,12 +73,12 @@ export default function Historico({ navigation }: any) {
       const fotosOrdenadas = [...operacao.fotos].sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
       const dataFormatada = operacao.data_visita ? operacao.data_visita.split('-').reverse().join('/') : '';
 
-      const fotosHtml = fotosOrdenadas.map((foto: any, index: number) => `
-        <div class="photo-item">
+      const criarFotoHtml = (foto: any, index: number, attrs: string = '') => `
+        <div class="photo-item"${attrs}>
           <img src="${foto.foto_url}" />
           <div class="photo-caption"><strong>F${index + 1}- </strong>${foto.descricao}</div>
         </div>
-      `).join('');
+      `;
 
       const estilos = `
         @page { size: A4; margin: 0 !important; }
@@ -107,9 +107,11 @@ export default function Historico({ navigation }: any) {
         .photo-input-col:last-child { margin-right: 0; }
         .photo-input-label { font-size: 11px; margin-bottom: 2px; }
         .photo-input-box { background-color: #fff !important; border: 2px solid #000; padding: 6px; font-weight: bold; text-align: center; font-size: 12px; min-height: 15px; }
-        .photo-grid { display: flex; flex-wrap: wrap; justify-content: space-between; margin-top: 15px; padding-bottom: 20mm;}
-        .photo-item { width: 48%; margin-bottom: 25px; border: 2px solid #000; background-color: #fff !important; box-sizing: border-box; page-break-inside: avoid; }
-        .photo-item img { width: 100%; height: 230px; object-fit: cover; display: block; border-bottom: 2px solid #000; }
+        .photo-grid { margin-top: 0; padding-bottom: 0; }
+        .photo-grid::after { content: ""; display: table; clear: both; }
+        .photo-item { width: 48%; margin-bottom: 25px; border: 2px solid #000; background-color: #fff !important; box-sizing: border-box; page-break-inside: avoid; float: left; overflow: hidden; }
+        .photo-item:nth-child(odd) { clear: left; margin-right: 4%; }
+        .photo-item img { width: 100%; height: 230px; object-fit: cover; display: block; border-bottom: 2px solid #000; box-sizing: border-box; }
         .photo-caption { padding: 10px; font-size: 11px; text-align: left; color: #000; }
       `;
 
@@ -133,11 +135,40 @@ export default function Historico({ navigation }: any) {
         </div>
       `;
 
-      const cabecalhoFotosHtml = `
-        <div class="cabecalho-fotos">
+      const criarCabecalhoFotosHtml = (attrs: string = '') => `
+        <div class="cabecalho-fotos"${attrs}>
           <img src="https://nwgmloromztpzbeupzgz.supabase.co/storage/v1/object/public/assets/8bc74c91510e4c8c_org.jpg" style="height: 100px; width: auto; display: block;" />
         </div>
       `;
+
+      // Cabeçalho de dados + título do registo fotográfico (repetido em TODAS as páginas de fotos)
+      const criarTopoFotosHtml = (attrs: string = '') => `
+        <div${attrs}>
+          <div class="main-title">RELATÓRIO DE VERIFICAÇÃO FÍSICA NO LOCAL</div>
+          <div class="gray-block-photos">
+            <div class="photo-input-col"><div class="photo-input-label">Nº OPERAÇÃO:</div><div class="photo-input-box">${operacao.n_operacao}</div></div>
+            <div class="photo-input-col"><div class="photo-input-label">Data da Visita:</div><div class="photo-input-box">${dataFormatada}</div></div>
+            <div class="photo-input-col"><div class="photo-input-label">NIFAP</div><div class="photo-input-box">${agricultor.nifap}</div></div>
+          </div>
+          <div style="text-align: center; font-weight: bold; font-size: 14px; margin-bottom: 15px;">REGISTO FOTOGRÁFICO-ANEXO III</div>
+        </div>
+      `;
+
+      // Uma página completa do registo fotográfico (logo + dados + título + fotos dessa página)
+      const criarPaginaFotosHtml = (indices: number[]) => `
+        ${criarCabecalhoFotosHtml()}
+        <div class="content-cell">
+          ${criarTopoFotosHtml()}
+          <div class="photo-grid">
+            ${indices.length > 0
+              ? indices.map(i => criarFotoHtml(fotosOrdenadas[i], i)).join('')
+              : '<p style="text-align:center; width:100%; color:#64748b;">Nenhuma foto registada.</p>'}
+          </div>
+        </div>
+      `;
+
+      const montarPaginasFotos = (paginas: number[][]) =>
+        paginas.map((indices, idx) => (idx > 0 ? '<div style="page-break-before: always;"></div>' : '') + criarPaginaFotosHtml(indices)).join('');
 
       const criarRodapeHtml = (alturaPx?: number) => `
         <div class="rodape" data-rodape${alturaPx ? ` style="height: ${alturaPx}px;"` : ''}>
@@ -151,7 +182,7 @@ export default function Historico({ navigation }: any) {
         </div>
       `;
 
-      // 2. BLOCO DE ASSINATURAS ATUALIZADO COM O 2º TÉCNICO!
+      // 2. BLOCO DE ASSINATURAS: APENAS DUAS CAIXAS (1º e 2º TÉCNICO) LADO A LADO
       const assinaturasBox = `
         <div class="content-cell">
           <div class="section-title" style="margin-bottom: 15px;">7. Assinaturas</div>
@@ -162,23 +193,16 @@ export default function Historico({ navigation }: any) {
               <div style="display: flex; justify-content: space-between; font-size: 11px; margin-top: 4px;">
                 <span>${operacao.nome_tecnico || 'Teresa Rodrigues'}</span><span>${operacao.num_tecnico || '1593'}</span>
               </div>
-              
-              ${operacao.nome_tecnico_2 ? `
-                <div style="border: 1px solid #000; height: 50px; margin-top: 15px;"></div>
-                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-top: 4px;">
-                  <span>${operacao.nome_tecnico_2}</span><span>${operacao.num_tecnico_2 || ''}</span>
-                </div>
-              ` : `
-                <div style="border: 1px solid #000; height: 50px; margin-top: 15px;"></div>
-              `}
             </div>
-            
+
             <div style="width: 45%;">
               <div style="border: 1px solid #000; height: 50px;"></div>
-              <div style="border: 1px solid #000; height: 50px; margin-top: 29px;"></div>
+              <div style="display: flex; justify-content: space-between; font-size: 11px; margin-top: 4px;">
+                <span>${operacao.nome_tecnico_2 || ''}</span><span>${operacao.num_tecnico_2 || ''}</span>
+              </div>
             </div>
           </div>
-          
+
           <div style="display: flex; justify-content: space-between; align-items: flex-end;">
             <div style="width: 45%;">
               <div style="font-weight: bold; margin-bottom: 5px;">O Superior Hierárquico:</div>
@@ -232,19 +256,6 @@ export default function Historico({ navigation }: any) {
         `<div class="content-cell"><div class="anexos">ANEXOS:<br><br>- ANEXO I &nbsp;&nbsp;&nbsp;- Adenda<br>- ANEXO II A - Verificação dos Investimentos Realizados<br>- ANEXO II B - Verificação do Parcelário e Ocupação Cultural<br>- ANEXO II C - Condicionantes<br>- ANEXO III &nbsp;&nbsp;- Registo Fotográfico<br>- ANEXO IV &nbsp;&nbsp;- Esquema geral dos investimentos realizados</div></div>`,
       ];
 
-      const blocoFotos = `
-        <div class="content-cell">
-          <div class="main-title">RELATÓRIO DE VERIFICAÇÃO FÍSICA NO LOCAL</div>
-          <div class="gray-block-photos">
-            <div class="photo-input-col"><div class="photo-input-label">Nº OPERAÇÃO:</div><div class="photo-input-box">${operacao.n_operacao}</div></div>
-            <div class="photo-input-col"><div class="photo-input-label">Data da Visita:</div><div class="photo-input-box">${dataFormatada}</div></div>
-            <div class="photo-input-col"><div class="photo-input-label">NIFAP</div><div class="photo-input-box">${agricultor.nifap}</div></div>
-          </div>
-          <div style="text-align: center; font-weight: bold; font-size: 14px; margin-bottom: 15px;">REGISTO FOTOGRÁFICO-ANEXO III</div>
-          <div class="photo-grid">${fotosHtml || '<p style="text-align:center; width:100%; color:#64748b;">Nenhuma foto registada.</p>'}</div>
-        </div>
-      `;
-
       const montarDocumento = (corpoHtml: string) => `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>${estilos}</style></head><body>${corpoHtml}</body></html>`;
 
       const aguardarCarregamento = (frame: HTMLIFrameElement): Promise<void> => {
@@ -269,7 +280,11 @@ export default function Historico({ navigation }: any) {
         medidor.style.visibility = 'hidden'; medidor.style.position = 'absolute'; medidor.style.left = '-9999px'; medidor.style.width = '210mm';
         document.body.appendChild(medidor);
 
-        const corpoMedicao = criarCabecalhoHtml() + criarRodapeHtml() + blocosRelatorio.map((bloco, i) => bloco.replace('<div class="content-cell">', `<div class="content-cell" data-blk="${i}">`)).join('');
+        const corpoMedicao =
+          criarCabecalhoHtml() + criarRodapeHtml()
+          + blocosRelatorio.map((bloco, i) => bloco.replace('<div class="content-cell">', `<div class="content-cell" data-blk="${i}">`)).join('')
+          + criarCabecalhoFotosHtml(' data-cabecalho-fotos')
+          + `<div class="content-cell">${criarTopoFotosHtml(' data-topo-fotos')}<div class="photo-grid">${fotosOrdenadas.map((f: any, i: number) => criarFotoHtml(f, i, ` data-foto="${i}"`)).join('')}</div></div>`;
         medidor.contentDocument?.open(); medidor.contentDocument?.write(montarDocumento(corpoMedicao)); medidor.contentDocument?.close();
         await aguardarCarregamento(medidor);
 
@@ -277,6 +292,9 @@ export default function Historico({ navigation }: any) {
         const alturaCabecalhoPx = Math.ceil(doc.querySelector('[data-cabecalho]')!.getBoundingClientRect().height) + 2;
         const alturaRodapePx = Math.ceil(doc.querySelector('[data-rodape]')!.getBoundingClientRect().height) + 2;
         const alturas = Array.from(doc.querySelectorAll('[data-blk]')).map(el => (el as HTMLElement).getBoundingClientRect().height);
+        const alturaCabFotosPx = Math.ceil(doc.querySelector('[data-cabecalho-fotos]')!.getBoundingClientRect().height) + 2;
+        const alturaTopoFotosPx = Math.ceil(doc.querySelector('[data-topo-fotos]')!.getBoundingClientRect().height) + 2;
+        const alturasFotos = Array.from(doc.querySelectorAll('[data-foto]')).map(el => (el as HTMLElement).getBoundingClientRect().height);
         document.body.removeChild(medidor);
 
         const MM_PARA_PX = 96 / 25.4;
@@ -291,12 +309,35 @@ export default function Historico({ navigation }: any) {
           alturaAcumulada += alturaComFolga;
         });
 
+        // Paginação das fotos: as fotos ficam 2 por linha, por isso o orçamento é gasto linha a linha.
+        // Sempre que uma linha não cabe, abre-se nova página (que repete logo + dados + título).
+        // Usa uma margem de segurança generosa porque a grelha de fotos não tem rodapé próprio.
+        const ORCAMENTO_FOTOS_PX = (297 * MM_PARA_PX) - alturaCabFotosPx - alturaTopoFotosPx - (25 * MM_PARA_PX);
+        const MARGEM_FOTO_PX = 25; // .photo-item margin-bottom
+        const MAX_FOTOS_POR_PAGINA = 4; // limite de segurança: nunca tentar mais do que 2 linhas por página
+
+        const paginasFotos: number[][] = [[]];
+        let alturaFotosAcumulada = 0;
+        for (let i = 0; i < alturasFotos.length; i += 2) {
+          const alturaLinha = Math.max(alturasFotos[i], alturasFotos[i + 1] ?? 0) + MARGEM_FOTO_PX;
+          const ultima = paginasFotos[paginasFotos.length - 1];
+          const excedeOrcamento = alturaFotosAcumulada + alturaLinha > ORCAMENTO_FOTOS_PX;
+          const excedeLimite = ultima.length >= MAX_FOTOS_POR_PAGINA;
+          if ((excedeOrcamento || excedeLimite) && ultima.length > 0) {
+            paginasFotos.push([]); alturaFotosAcumulada = 0;
+          }
+          const atual = paginasFotos[paginasFotos.length - 1];
+          atual.push(i);
+          if (i + 1 < alturasFotos.length) atual.push(i + 1);
+          alturaFotosAcumulada += alturaLinha;
+        }
+
         let corpoFinal = '';
         paginas.forEach((indices, idx) => {
           if (idx > 0) corpoFinal += '<div style="page-break-before: always;"></div>';
           corpoFinal += criarCabecalhoHtml(alturaCabecalhoPx) + indices.map(i => blocosRelatorio[i]).join('') + criarRodapeHtml(alturaRodapePx);
         });
-        corpoFinal += '<div style="page-break-before: always;"></div>' + cabecalhoFotosHtml + blocoFotos;
+        corpoFinal += '<div style="page-break-before: always;"></div>' + montarPaginasFotos(paginasFotos);
 
         const iframe = document.createElement('iframe');
         iframe.style.visibility = 'hidden'; iframe.style.position = 'absolute'; iframe.style.left = '-9999px'; iframe.style.width = '210mm';
@@ -306,7 +347,15 @@ export default function Historico({ navigation }: any) {
         iframe.contentWindow?.focus(); iframe.contentWindow?.print();
         setTimeout(() => { document.body.removeChild(iframe); }, 2000);
       } else {
-        const corpoNativo = criarCabecalhoHtml() + blocosRelatorio.join('') + criarRodapeHtml() + '<div style="page-break-before: always;"></div>' + cabecalhoFotosHtml + blocoFotos;
+        // No nativo não há medição possível: usa-se um número fixo de fotos por página (2 linhas de 2).
+        const FOTOS_POR_PAGINA = 4;
+        const paginasFotosNativo: number[][] = [];
+        for (let i = 0; i < fotosOrdenadas.length; i += FOTOS_POR_PAGINA) {
+          paginasFotosNativo.push(fotosOrdenadas.slice(i, i + FOTOS_POR_PAGINA).map((_: any, j: number) => i + j));
+        }
+        if (paginasFotosNativo.length === 0) paginasFotosNativo.push([]);
+
+        const corpoNativo = criarCabecalhoHtml() + blocosRelatorio.join('') + criarRodapeHtml() + '<div style="page-break-before: always;"></div>' + montarPaginasFotos(paginasFotosNativo);
         const { uri } = await Print.printToFileAsync({ html: montarDocumento(corpoNativo) });
         await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
       }

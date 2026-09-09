@@ -32,6 +32,9 @@ export default function Formulario() {
   const [descIrregularidade, setDescIrregularidade] = useState('');
   const [nomeTecnico, setNomeTecnico] = useState('');
   const [numTecnico, setNumTecnico] = useState('');
+  const [temSegundoTecnico, setTemSegundoTecnico] = useState(false);
+  const [nomeTecnico2, setNomeTecnico2] = useState('');
+  const [numTecnico2, setNumTecnico2] = useState('');
 
   const [fotos, setFotos] = useState<FotoData[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -80,7 +83,8 @@ export default function Formulario() {
         verificacao_1a: verificacao1a, verificacao_1b: verificacao1b,
         regras_publicidade: regrasPublicidade, confronto_documentos: confrontoDocumentos, controlo_visual: controloVisual,
         outras_verificacoes: outrasVerificacoes, desconformidades_irreg: descIrregularidade,
-        nome_tecnico: nomeTecnico, num_tecnico: numTecnico
+        nome_tecnico: nomeTecnico, num_tecnico: numTecnico,
+        nome_tecnico_2: temSegundoTecnico ? nomeTecnico2 : null, num_tecnico_2: temSegundoTecnico ? numTecnico2 : null
       }]).select('id').single();
       if (errOp) throw new Error('Erro a criar Operação');
 
@@ -159,6 +163,25 @@ export default function Formulario() {
           <View style={{ flex: 2 }}><Text style={styles.label}>7 - Nome do Técnico</Text><TextInput style={[styles.input, webStyle]} value={nomeTecnico} onChangeText={setNomeTecnico} /></View>
           <View style={{ flex: 1 }}><Text style={styles.label}>Número</Text><TextInput style={[styles.input, webStyle]} value={numTecnico} onChangeText={setNumTecnico} /></View>
         </View>
+
+        {temSegundoTecnico ? (
+          <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
+            <View style={{ flex: 2 }}><Text style={styles.label}>2º Técnico</Text><TextInput style={[styles.input, webStyle]} value={nomeTecnico2} onChangeText={setNomeTecnico2} /></View>
+            <View style={{ flex: 1 }}><Text style={styles.label}>Número</Text><TextInput style={[styles.input, webStyle]} value={numTecnico2} onChangeText={setNumTecnico2} /></View>
+            <TouchableOpacity
+              style={[styles.iconBtnDanger, { marginTop: 19 }]}
+              onPress={() => { setTemSegundoTecnico(false); setNomeTecnico2(''); setNumTecnico2(''); }}
+            >
+              {Platform.OS !== 'web' && <MaterialIcons name="delete" size={20} color="#ef4444" />}
+              <Text style={styles.iconBtnDangerText}>Remover</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.btnAddTecnico} onPress={() => setTemSegundoTecnico(true)}>
+            {Platform.OS !== 'web' && <MaterialIcons name="person-add" size={18} color="#004b87" />}
+            <Text style={styles.btnAddTecnicoText}>+ Adicionar 2º Técnico</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <Text style={styles.sectionTitle}>Anexo III - Registo Fotográfico</Text>
@@ -229,6 +252,8 @@ const styles = StyleSheet.create({
   iconBtn: { padding: 8, paddingHorizontal: 12, backgroundColor: '#f1f5f9', borderRadius: 6, borderWidth: 1, borderColor: '#e2e8f0' },
   iconBtnDanger: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#fef2f2', borderRadius: 6, borderWidth: 1, borderColor: '#fecaca' },
   iconBtnDangerText: { color: '#ef4444', fontWeight: '600', fontSize: 13, marginLeft: 4 },
+  btnAddTecnico: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f0f9ff', paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: '#bae6fd', marginTop: 4 },
+  btnAddTecnicoText: { color: '#004b87', fontWeight: '700', fontSize: 13, marginLeft: 6 },
   btnSubmit: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#059669', paddingVertical: 16, borderRadius: 8, marginTop: 10, marginBottom: 40 },
   btnSubmitText: { color: '#ffffff', fontWeight: '700', fontSize: 16, marginLeft: 8 }
 });
