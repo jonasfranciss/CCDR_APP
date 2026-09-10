@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Image, ActivityIndicator, Platform } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from './supabase';
 
 interface FotoData { uri: string; descricao: string; }
+interface AnexoData { uri: string; nome: string; }
 
 export default function Formulario() {
   const [nifap, setNifap] = useState('');
@@ -37,7 +39,15 @@ export default function Formulario() {
   const [numTecnico2, setNumTecnico2] = useState('');
 
   const [fotos, setFotos] = useState<FotoData[]>([]);
+  const [anexo1, setAnexo1] = useState<AnexoData | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const escolherAnexo1 = async () => {
+    const resultado = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
+    if (!resultado.canceled && resultado.assets && resultado.assets[0]) {
+      setAnexo1({ uri: resultado.assets[0].uri, nome: resultado.assets[0].name });
+    }
+  };
 
   const adicionarCamera = async () => {
     const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
@@ -102,8 +112,23 @@ export default function Formulario() {
         const { data: urlData } = supabase.storage.from('fotos_relatorio').getPublicUrl(nomeFicheiro);
         await supabase.from('fotos').insert([{ operacao_id: nOp.id, descricao: foto.descricao, foto_url: urlData.publicUrl, ordem: i }]);
       }
+
+      if (anexo1) {
+        const nomeFicheiroAnexo = `${nifap}_${nOperacao}_anexo1_${Date.now()}.pdf`;
+        if (Platform.OS === 'web') {
+          const response = await fetch(anexo1.uri);
+          const blob = await response.blob();
+          await supabase.storage.from('fotos_relatorio').upload(nomeFicheiroAnexo, blob, { contentType: 'application/pdf' });
+        } else {
+          const base64 = await FileSystem.readAsStringAsync(anexo1.uri, { encoding: 'base64' });
+          await supabase.storage.from('fotos_relatorio').upload(nomeFicheiroAnexo, decode(base64), { contentType: 'application/pdf' });
+        }
+        const { data: urlAnexo } = supabase.storage.from('fotos_relatorio').getPublicUrl(nomeFicheiroAnexo);
+        await supabase.from('operacoes').update({ anexo1_url: urlAnexo.publicUrl, anexo1_nome: anexo1.nome }).eq('id', nOp.id);
+      }
+
       alert('Registo guardado com sucesso!');
-      setNifap(''); setNOperacao(''); setFotos([]); setNomePromotor('');
+      setNifap(''); setNOperacao(''); setFotos([]); setNomePromotor(''); setAnexo1(null);
     } catch (error: any) { alert(error.message); } finally { setIsSubmitting(false); }
   };
 
@@ -184,6 +209,25 @@ export default function Formulario() {
         )}
       </View>
 
+      <Text style={styles.sectionTitle}>Anexo I</Text>
+      <View style={styles.card}>
+        {anexo1 ? (
+          <View style={styles.anexoRow}>
+            {Platform.OS !== 'web' && <MaterialIcons name="picture-as-pdf" size={22} color="#004b87" />}
+            <Text style={styles.anexoNome} numberOfLines={1}>{anexo1.nome}</Text>
+            <TouchableOpacity style={styles.iconBtnDanger} onPress={() => setAnexo1(null)}>
+              {Platform.OS !== 'web' && <MaterialIcons name="delete" size={18} color="#ef4444" />}
+              <Text style={styles.iconBtnDangerText}>Remover</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.btnSecondary} onPress={escolherAnexo1}>
+            {Platform.OS !== 'web' && <MaterialIcons name="attach-file" size={20} color="#004b87" />}
+            <Text style={styles.btnSecondaryText}>Adicionar Anexo I (PDF)</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
       <Text style={styles.sectionTitle}>Anexo III - Registo Fotográfico</Text>
       <View style={styles.actionsRow}>
         <TouchableOpacity style={styles.btnPrimary} onPress={adicionarCamera}>
@@ -254,6 +298,8 @@ const styles = StyleSheet.create({
   iconBtnDangerText: { color: '#ef4444', fontWeight: '600', fontSize: 13, marginLeft: 4 },
   btnAddTecnico: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f0f9ff', paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: '#bae6fd', marginTop: 4 },
   btnAddTecnicoText: { color: '#004b87', fontWeight: '700', fontSize: 13, marginLeft: 6 },
+  anexoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  anexoNome: { flex: 1, fontSize: 14, color: '#334155', fontWeight: '600' },
   btnSubmit: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#059669', paddingVertical: 16, borderRadius: 8, marginTop: 10, marginBottom: 40 },
   btnSubmitText: { color: '#ffffff', fontWeight: '700', fontSize: 16, marginLeft: 8 }
 });

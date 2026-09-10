@@ -5,6 +5,11 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { supabase } from './supabase';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
+import { decode, encode } from 'base64-arraybuffer';
+// Importa o bundle autónomo (sem dependência externa de 'tslib') para evitar um bug de
+// interoperabilidade CommonJS/ESM do bundler web com o pacote 'pdf-lib' normal.
+import { PDFDocument } from 'pdf-lib/dist/pdf-lib.esm.js';
 
 export default function Historico({ navigation }: any) {
   const [nifaps, setNifaps] = useState<any[]>([]);
@@ -29,7 +34,7 @@ export default function Historico({ navigation }: any) {
           investimento_total, apoio_atribuido, verificacao_1a, verificacao_1b, 
           regras_publicidade, confronto_documentos, controlo_visual, outras_verificacoes, 
           desconformidades_just, desconformidades_irreg, nome_tecnico, num_tecnico,
-          nome_tecnico_2, num_tecnico_2,
+          nome_tecnico_2, num_tecnico_2, anexo1_url, anexo1_nome,
           fotos (id, descricao, foto_url, ordem)
         )
       `)
@@ -113,6 +118,7 @@ export default function Historico({ navigation }: any) {
         .photo-item:nth-child(odd) { clear: left; margin-right: 4%; }
         .photo-item img { width: 100%; height: 230px; object-fit: cover; display: block; border-bottom: 2px solid #000; box-sizing: border-box; }
         .photo-caption { padding: 10px; font-size: 11px; text-align: left; color: #000; }
+        .pdf-page-frame { width: 210mm; height: 297mm; overflow: hidden; position: relative; background: #fff; box-sizing: border-box; }
       `;
 
       const criarCabecalhoHtml = (alturaPx?: number) => `
@@ -275,6 +281,39 @@ export default function Historico({ navigation }: any) {
         });
       };
 
+      // Descarrega um ficheiro remoto (ex: o Anexo I) como bytes, para poder ser fundido no PDF final.
+      const baixarBytes = async (url: string): Promise<Uint8Array> => {
+        const resposta = await fetch(url);
+        const buffer = await resposta.arrayBuffer();
+        return new Uint8Array(buffer);
+      };
+
+      // Funde várias partes (cada uma um PDF completo em bytes) num único PDF final, por ordem.
+      const fundirPdfs = async (partes: Uint8Array[]): Promise<Uint8Array> => {
+        const final = await PDFDocument.create();
+        for (const parte of partes) {
+          const doc = await PDFDocument.load(parte);
+          const paginasCopiadas = await final.copyPages(doc, doc.getPageIndices());
+          paginasCopiadas.forEach(p => final.addPage(p));
+        }
+        return final.save();
+      };
+
+      // Constrói um PDF em que cada página é uma imagem já renderizada (usado na web para o relatório e fotos,
+      // já que window.print() não dá acesso aos bytes do PDF necessários para fundir o Anexo I).
+      const montarPdfDeImagens = async (paginasJpg: Uint8Array[]): Promise<Uint8Array> => {
+        const doc = await PDFDocument.create();
+        const A4_PT_LARGURA = 595.28, A4_PT_ALTURA = 841.89;
+        for (const bytes of paginasJpg) {
+          const imagem = await doc.embedJpg(bytes);
+          const pagina = doc.addPage([A4_PT_LARGURA, A4_PT_ALTURA]);
+          pagina.drawImage(imagem, { x: 0, y: 0, width: A4_PT_LARGURA, height: A4_PT_ALTURA });
+        }
+        return doc.save();
+      };
+
+      const temAnexo1 = !!operacao.anexo1_url;
+
       if (Platform.OS === 'web') {
         const medidor = document.createElement('iframe');
         medidor.style.visibility = 'hidden'; medidor.style.position = 'absolute'; medidor.style.left = '-9999px'; medidor.style.width = '210mm';
@@ -332,20 +371,71 @@ export default function Historico({ navigation }: any) {
           alturaFotosAcumulada += alturaLinha;
         }
 
-        let corpoFinal = '';
-        paginas.forEach((indices, idx) => {
-          if (idx > 0) corpoFinal += '<div style="page-break-before: always;"></div>';
-          corpoFinal += criarCabecalhoHtml(alturaCabecalhoPx) + indices.map(i => blocosRelatorio[i]).join('') + criarRodapeHtml(alturaRodapePx);
-        });
-        corpoFinal += '<div style="page-break-before: always;"></div>' + montarPaginasFotos(paginasFotos);
+        if (temAnexo1) {
+          // Com Anexo I: não dá para usar window.print() (não expõe os bytes do PDF para fundir),
+          // por isso cada página é capturada como imagem e o PDF final é montado com pdf-lib,
+          // com as páginas reais do Anexo I inseridas a seguir à página dos anexos.
+          const html2canvas = (await import('html2canvas')).default;
 
-        const iframe = document.createElement('iframe');
-        iframe.style.visibility = 'hidden'; iframe.style.position = 'absolute'; iframe.style.left = '-9999px'; iframe.style.width = '210mm';
-        document.body.appendChild(iframe);
-        iframe.contentDocument?.open(); iframe.contentDocument?.write(montarDocumento(corpoFinal)); iframe.contentDocument?.close();
-        await aguardarCarregamento(iframe);
-        iframe.contentWindow?.focus(); iframe.contentWindow?.print();
-        setTimeout(() => { document.body.removeChild(iframe); }, 2000);
+          const frameCaptura = document.createElement('iframe');
+          frameCaptura.style.visibility = 'hidden'; frameCaptura.style.position = 'absolute'; frameCaptura.style.left = '-9999px';
+          frameCaptura.style.width = '210mm'; frameCaptura.style.height = '297mm';
+          document.body.appendChild(frameCaptura);
+
+          const capturarPaginaJpg = async (corpoPagina: string): Promise<Uint8Array> => {
+            frameCaptura.contentDocument?.open();
+            frameCaptura.contentDocument?.write(montarDocumento(`<div class="pdf-page-frame">${corpoPagina}</div>`));
+            frameCaptura.contentDocument?.close();
+            await aguardarCarregamento(frameCaptura);
+            const elemento = frameCaptura.contentDocument!.querySelector('.pdf-page-frame') as HTMLElement;
+            const canvas = await html2canvas(elemento, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+            const blob: Blob = await new Promise((resolve, reject) =>
+              canvas.toBlob((b) => b ? resolve(b) : reject(new Error('Falha ao gerar imagem da página')), 'image/jpeg', 0.92)
+            );
+            return new Uint8Array(await blob.arrayBuffer());
+          };
+
+          const paginasRelatorioJpg: Uint8Array[] = [];
+          for (const indices of paginas) {
+            const corpoPagina = criarCabecalhoHtml(alturaCabecalhoPx) + indices.map(i => blocosRelatorio[i]).join('') + criarRodapeHtml(alturaRodapePx);
+            paginasRelatorioJpg.push(await capturarPaginaJpg(corpoPagina));
+          }
+          const paginasFotosJpg: Uint8Array[] = [];
+          for (const indices of paginasFotos) {
+            paginasFotosJpg.push(await capturarPaginaJpg(criarPaginaFotosHtml(indices)));
+          }
+          document.body.removeChild(frameCaptura);
+
+          const [relatorioBytes, anexoBytes, fotosBytes] = await Promise.all([
+            montarPdfDeImagens(paginasRelatorioJpg),
+            baixarBytes(operacao.anexo1_url),
+            montarPdfDeImagens(paginasFotosJpg),
+          ]);
+          const finalBytes = await fundirPdfs([relatorioBytes, anexoBytes, fotosBytes]);
+
+          const blob = new Blob([finalBytes as BlobPart], { type: 'application/pdf' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          const nomeFicheiro = `Relatorio_${(operacao.n_operacao || agricultor.nifap).toString().replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+          link.href = url; link.download = nomeFicheiro;
+          document.body.appendChild(link); link.click(); document.body.removeChild(link);
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+        } else {
+          let corpoFinal = '';
+          paginas.forEach((indices, idx) => {
+            if (idx > 0) corpoFinal += '<div style="page-break-before: always;"></div>';
+            corpoFinal += criarCabecalhoHtml(alturaCabecalhoPx) + indices.map(i => blocosRelatorio[i]).join('') + criarRodapeHtml(alturaRodapePx);
+          });
+          corpoFinal += '<div style="page-break-before: always;"></div>' + montarPaginasFotos(paginasFotos);
+
+          const iframe = document.createElement('iframe');
+          iframe.style.visibility = 'hidden'; iframe.style.position = 'absolute'; iframe.style.left = '-9999px'; iframe.style.width = '210mm';
+          document.body.appendChild(iframe);
+          iframe.contentDocument?.open(); iframe.contentDocument?.write(montarDocumento(corpoFinal)); iframe.contentDocument?.close();
+          await aguardarCarregamento(iframe);
+          iframe.contentWindow?.focus(); iframe.contentWindow?.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 2000);
+        }
       } else {
         // No nativo não há medição possível: usa-se um número fixo de fotos por página (2 linhas de 2).
         const FOTOS_POR_PAGINA = 4;
@@ -355,9 +445,31 @@ export default function Historico({ navigation }: any) {
         }
         if (paginasFotosNativo.length === 0) paginasFotosNativo.push([]);
 
-        const corpoNativo = criarCabecalhoHtml() + blocosRelatorio.join('') + criarRodapeHtml() + '<div style="page-break-before: always;"></div>' + montarPaginasFotos(paginasFotosNativo);
-        const { uri } = await Print.printToFileAsync({ html: montarDocumento(corpoNativo) });
-        await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        if (temAnexo1) {
+          // Com Anexo I: gera o relatório (até à página dos anexos) e as fotos como dois PDFs
+          // separados, com o Anexo I real fundido entre eles.
+          const corpoRelatorio = criarCabecalhoHtml() + blocosRelatorio.join('') + criarRodapeHtml();
+          const corpoFotosNativo = montarPaginasFotos(paginasFotosNativo);
+
+          const [{ base64: relatorioBase64 }, { base64: fotosBase64 }, anexoBytes] = await Promise.all([
+            Print.printToFileAsync({ html: montarDocumento(corpoRelatorio), base64: true }),
+            Print.printToFileAsync({ html: montarDocumento(corpoFotosNativo), base64: true }),
+            baixarBytes(operacao.anexo1_url),
+          ]);
+
+          const relatorioBytes = new Uint8Array(decode(relatorioBase64!));
+          const fotosBytes = new Uint8Array(decode(fotosBase64!));
+          const finalBytes = await fundirPdfs([relatorioBytes, anexoBytes, fotosBytes]);
+
+          const finalBuffer = finalBytes.buffer.slice(finalBytes.byteOffset, finalBytes.byteOffset + finalBytes.byteLength) as ArrayBuffer;
+          const destino = FileSystem.cacheDirectory + `relatorio_${operacao.id}.pdf`;
+          await FileSystem.writeAsStringAsync(destino, encode(finalBuffer), { encoding: 'base64' });
+          await Sharing.shareAsync(destino, { UTI: '.pdf', mimeType: 'application/pdf' });
+        } else {
+          const corpoNativo = criarCabecalhoHtml() + blocosRelatorio.join('') + criarRodapeHtml() + '<div style="page-break-before: always;"></div>' + montarPaginasFotos(paginasFotosNativo);
+          const { uri } = await Print.printToFileAsync({ html: montarDocumento(corpoNativo) });
+          await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        }
       }
     } catch (error: any) { alert('Erro ao gerar PDF: ' + error.message); }
   };
