@@ -9,7 +9,29 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
 
-LogBox.ignoreLogs(['InteractionManager has been deprecated']);  
+LogBox.ignoreLogs(['InteractionManager has been deprecated']);
+
+// Estado e ações para uma caixa de anexo em PDF (usado para o Anexo I, II A, II B e II C).
+function useAnexo(urlInicial: string, nomeInicial: string) {
+  const [urlAtual] = useState(urlInicial || '');
+  const [nomeOriginal] = useState(nomeInicial || '');
+  const [nomeAtual, setNomeAtual] = useState(nomeInicial || '');
+  const [novo, setNovo] = useState<{ uri: string; nome: string } | null>(null);
+  const [removido, setRemovido] = useState(false);
+
+  const escolher = async () => {
+    const resultado = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
+    if (!resultado.canceled && resultado.assets && resultado.assets[0]) {
+      setNovo({ uri: resultado.assets[0].uri, nome: resultado.assets[0].name });
+      setRemovido(false);
+      setNomeAtual(resultado.assets[0].name);
+    }
+  };
+
+  const remover = () => { setNovo(null); setRemovido(true); setNomeAtual(''); };
+
+  return { urlAtual, nomeOriginal, nomeAtual, novo, removido, escolher, remover };
+}
 
 export default function Editar({ route, navigation }: any) {
   const { operacao, agricultor } = route.params;
@@ -40,26 +62,11 @@ export default function Editar({ route, navigation }: any) {
   const [nomeTecnico2, setNomeTecnico2] = useState(operacao.nome_tecnico_2 || '');
   const [numTecnico2, setNumTecnico2] = useState(operacao.num_tecnico_2 || '');
 
-  // ANEXO I
-  const [anexo1UrlAtual] = useState(operacao.anexo1_url || '');
-  const [anexo1NomeAtual, setAnexo1NomeAtual] = useState(operacao.anexo1_nome || '');
-  const [anexo1Novo, setAnexo1Novo] = useState<{ uri: string; nome: string } | null>(null);
-  const [anexo1Removido, setAnexo1Removido] = useState(false);
-
-  const escolherAnexo1 = async () => {
-    const resultado = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
-    if (!resultado.canceled && resultado.assets && resultado.assets[0]) {
-      setAnexo1Novo({ uri: resultado.assets[0].uri, nome: resultado.assets[0].name });
-      setAnexo1Removido(false);
-      setAnexo1NomeAtual(resultado.assets[0].name);
-    }
-  };
-
-  const removerAnexo1 = () => {
-    setAnexo1Novo(null);
-    setAnexo1Removido(true);
-    setAnexo1NomeAtual('');
-  };
+  // ANEXOS
+  const anexo1 = useAnexo(operacao.anexo1_url, operacao.anexo1_nome);
+  const anexo2a = useAnexo(operacao.anexo2a_url, operacao.anexo2a_nome);
+  const anexo2b = useAnexo(operacao.anexo2b_url, operacao.anexo2b_nome);
+  const anexo2c = useAnexo(operacao.anexo2c_url, operacao.anexo2c_nome);
 
   const fotosIniciais = [...operacao.fotos].sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
   const [fotos, setFotos] = useState(fotosIniciais);
@@ -92,33 +99,43 @@ export default function Editar({ route, navigation }: any) {
          }
       }
 
-      let anexo1UrlFinal = anexo1UrlAtual || null;
-      let anexo1NomeFinal = anexo1UrlAtual ? operacao.anexo1_nome : null;
+      const processarAnexo = async (estado: ReturnType<typeof useAnexo>, sufixo: string): Promise<{ url: string | null; nome: string | null }> => {
+        let url = estado.urlAtual || null;
+        let nome = estado.urlAtual ? estado.nomeOriginal : null;
 
-      if (anexo1Removido || anexo1Novo) {
-        if (anexo1UrlAtual) {
-          const urlSemParams = anexo1UrlAtual.split('?')[0];
-          const caminho = urlSemParams.substring(urlSemParams.lastIndexOf('/') + 1);
-          await supabase.storage.from('fotos_relatorio').remove([caminho]);
-        }
-        if (anexo1Novo) {
-          const nomeFicheiro = `${nifap}_${nOperacao}_anexo1_${Date.now()}.pdf`;
-          if (Platform.OS === 'web') {
-            const response = await fetch(anexo1Novo.uri);
-            const blob = await response.blob();
-            await supabase.storage.from('fotos_relatorio').upload(nomeFicheiro, blob, { contentType: 'application/pdf' });
-          } else {
-            const base64 = await FileSystem.readAsStringAsync(anexo1Novo.uri, { encoding: 'base64' });
-            await supabase.storage.from('fotos_relatorio').upload(nomeFicheiro, decode(base64), { contentType: 'application/pdf' });
+        if (estado.removido || estado.novo) {
+          if (estado.urlAtual) {
+            const urlSemParams = estado.urlAtual.split('?')[0];
+            const caminho = urlSemParams.substring(urlSemParams.lastIndexOf('/') + 1);
+            await supabase.storage.from('fotos_relatorio').remove([caminho]);
           }
-          const { data: urlAnexo } = supabase.storage.from('fotos_relatorio').getPublicUrl(nomeFicheiro);
-          anexo1UrlFinal = urlAnexo.publicUrl;
-          anexo1NomeFinal = anexo1Novo.nome;
-        } else {
-          anexo1UrlFinal = null;
-          anexo1NomeFinal = null;
+          if (estado.novo) {
+            const nomeFicheiro = `${nifap}_${nOperacao}_${sufixo}_${Date.now()}.pdf`;
+            if (Platform.OS === 'web') {
+              const response = await fetch(estado.novo.uri);
+              const blob = await response.blob();
+              await supabase.storage.from('fotos_relatorio').upload(nomeFicheiro, blob, { contentType: 'application/pdf' });
+            } else {
+              const base64 = await FileSystem.readAsStringAsync(estado.novo.uri, { encoding: 'base64' });
+              await supabase.storage.from('fotos_relatorio').upload(nomeFicheiro, decode(base64), { contentType: 'application/pdf' });
+            }
+            const { data } = supabase.storage.from('fotos_relatorio').getPublicUrl(nomeFicheiro);
+            url = data.publicUrl;
+            nome = estado.novo.nome;
+          } else {
+            url = null;
+            nome = null;
+          }
         }
-      }
+        return { url, nome };
+      };
+
+      const [r1, r2a, r2b, r2c] = await Promise.all([
+        processarAnexo(anexo1, 'anexo1'),
+        processarAnexo(anexo2a, 'anexo2a'),
+        processarAnexo(anexo2b, 'anexo2b'),
+        processarAnexo(anexo2c, 'anexo2c'),
+      ]);
 
       await supabase.from('operacoes').update({
         nifap_id: finalNifapId,
@@ -142,8 +159,14 @@ export default function Editar({ route, navigation }: any) {
         num_tecnico: numTecnico,
         nome_tecnico_2: temSegundoTecnico ? nomeTecnico2 : null,
         num_tecnico_2: temSegundoTecnico ? numTecnico2 : null,
-        anexo1_url: anexo1UrlFinal,
-        anexo1_nome: anexo1NomeFinal
+        anexo1_url: r1.url,
+        anexo1_nome: r1.nome,
+        anexo2a_url: r2a.url,
+        anexo2a_nome: r2a.nome,
+        anexo2b_url: r2b.url,
+        anexo2b_nome: r2b.nome,
+        anexo2c_url: r2c.url,
+        anexo2c_nome: r2c.nome
       }).eq('id', operacao.id);
 
       for (let i = 0; i < fotos.length; i++) {
@@ -159,6 +182,27 @@ export default function Editar({ route, navigation }: any) {
   };
 
   const webStyle = Platform.OS === 'web' ? { outlineStyle: 'none' } as any : {};
+
+  const renderAnexoBox = (titulo: string, estado: ReturnType<typeof useAnexo>) => (
+    <View style={styles.card}>
+      <Text style={styles.sectionTitle}>{titulo}</Text>
+      {estado.nomeAtual ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Text style={{ flex: 1, fontSize: 14, color: '#334155', fontWeight: '600' }} numberOfLines={1}>{estado.nomeAtual}</Text>
+          <TouchableOpacity style={styles.btnAddTecnico} onPress={estado.escolher}>
+            <Text style={styles.btnAddTecnicoText}>Substituir</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.btnRemover} onPress={estado.remover}>
+            <Text style={styles.btnRemoverText}>Remover</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity style={styles.btnAddTecnico} onPress={estado.escolher}>
+          <Text style={styles.btnAddTecnicoText}>+ Adicionar {titulo} (PDF)</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 
   const renderHeader = () => (
     <View>
@@ -232,24 +276,10 @@ export default function Editar({ route, navigation }: any) {
         )}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Anexo I</Text>
-        {anexo1NomeAtual ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Text style={{ flex: 1, fontSize: 14, color: '#334155', fontWeight: '600' }} numberOfLines={1}>{anexo1NomeAtual}</Text>
-            <TouchableOpacity style={styles.btnAddTecnico} onPress={escolherAnexo1}>
-              <Text style={styles.btnAddTecnicoText}>Substituir</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.btnRemover} onPress={removerAnexo1}>
-              <Text style={styles.btnRemoverText}>Remover</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <TouchableOpacity style={styles.btnAddTecnico} onPress={escolherAnexo1}>
-            <Text style={styles.btnAddTecnicoText}>+ Adicionar Anexo I (PDF)</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      {renderAnexoBox('Anexo I', anexo1)}
+      {renderAnexoBox('Anexo II A', anexo2a)}
+      {renderAnexoBox('Anexo II B', anexo2b)}
+      {renderAnexoBox('Anexo II C', anexo2c)}
 
       <Text style={styles.sectionTitleOutside}>Organizar Fotos</Text>
     </View>

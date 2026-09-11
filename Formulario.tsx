@@ -40,12 +40,15 @@ export default function Formulario() {
 
   const [fotos, setFotos] = useState<FotoData[]>([]);
   const [anexo1, setAnexo1] = useState<AnexoData | null>(null);
+  const [anexo2a, setAnexo2a] = useState<AnexoData | null>(null);
+  const [anexo2b, setAnexo2b] = useState<AnexoData | null>(null);
+  const [anexo2c, setAnexo2c] = useState<AnexoData | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const escolherAnexo1 = async () => {
+  const escolherAnexo = async (definir: (a: AnexoData) => void) => {
     const resultado = await DocumentPicker.getDocumentAsync({ type: 'application/pdf' });
     if (!resultado.canceled && resultado.assets && resultado.assets[0]) {
-      setAnexo1({ uri: resultado.assets[0].uri, nome: resultado.assets[0].name });
+      definir({ uri: resultado.assets[0].uri, nome: resultado.assets[0].name });
     }
   };
 
@@ -113,26 +116,64 @@ export default function Formulario() {
         await supabase.from('fotos').insert([{ operacao_id: nOp.id, descricao: foto.descricao, foto_url: urlData.publicUrl, ordem: i }]);
       }
 
-      if (anexo1) {
-        const nomeFicheiroAnexo = `${nifap}_${nOperacao}_anexo1_${Date.now()}.pdf`;
+      const enviarAnexo = async (anexo: AnexoData | null, sufixo: string): Promise<{ url: string; nome: string } | null> => {
+        if (!anexo) return null;
+        const nomeFicheiro = `${nifap}_${nOperacao}_${sufixo}_${Date.now()}.pdf`;
         if (Platform.OS === 'web') {
-          const response = await fetch(anexo1.uri);
+          const response = await fetch(anexo.uri);
           const blob = await response.blob();
-          await supabase.storage.from('fotos_relatorio').upload(nomeFicheiroAnexo, blob, { contentType: 'application/pdf' });
+          await supabase.storage.from('fotos_relatorio').upload(nomeFicheiro, blob, { contentType: 'application/pdf' });
         } else {
-          const base64 = await FileSystem.readAsStringAsync(anexo1.uri, { encoding: 'base64' });
-          await supabase.storage.from('fotos_relatorio').upload(nomeFicheiroAnexo, decode(base64), { contentType: 'application/pdf' });
+          const base64 = await FileSystem.readAsStringAsync(anexo.uri, { encoding: 'base64' });
+          await supabase.storage.from('fotos_relatorio').upload(nomeFicheiro, decode(base64), { contentType: 'application/pdf' });
         }
-        const { data: urlAnexo } = supabase.storage.from('fotos_relatorio').getPublicUrl(nomeFicheiroAnexo);
-        await supabase.from('operacoes').update({ anexo1_url: urlAnexo.publicUrl, anexo1_nome: anexo1.nome }).eq('id', nOp.id);
+        const { data } = supabase.storage.from('fotos_relatorio').getPublicUrl(nomeFicheiro);
+        return { url: data.publicUrl, nome: anexo.nome };
+      };
+
+      const [enviado1, enviado2a, enviado2b, enviado2c] = await Promise.all([
+        enviarAnexo(anexo1, 'anexo1'),
+        enviarAnexo(anexo2a, 'anexo2a'),
+        enviarAnexo(anexo2b, 'anexo2b'),
+        enviarAnexo(anexo2c, 'anexo2c'),
+      ]);
+      if (enviado1 || enviado2a || enviado2b || enviado2c) {
+        await supabase.from('operacoes').update({
+          anexo1_url: enviado1?.url ?? null, anexo1_nome: enviado1?.nome ?? null,
+          anexo2a_url: enviado2a?.url ?? null, anexo2a_nome: enviado2a?.nome ?? null,
+          anexo2b_url: enviado2b?.url ?? null, anexo2b_nome: enviado2b?.nome ?? null,
+          anexo2c_url: enviado2c?.url ?? null, anexo2c_nome: enviado2c?.nome ?? null,
+        }).eq('id', nOp.id);
       }
 
       alert('Registo guardado com sucesso!');
-      setNifap(''); setNOperacao(''); setFotos([]); setNomePromotor(''); setAnexo1(null);
+      setNifap(''); setNOperacao(''); setFotos([]); setNomePromotor('');
+      setAnexo1(null); setAnexo2a(null); setAnexo2b(null); setAnexo2c(null);
     } catch (error: any) { alert(error.message); } finally { setIsSubmitting(false); }
   };
 
   const webStyle = Platform.OS === 'web' ? { outlineStyle: 'none' } as any : {};
+
+  const renderAnexoBox = (titulo: string, anexo: AnexoData | null, definir: (a: AnexoData) => void, remover: () => void) => (
+    <View style={styles.card}>
+      <Text style={styles.sectionTitle}>{titulo}</Text>
+      {anexo ? (
+        <View style={styles.anexoRow}>
+          {Platform.OS !== 'web' && <MaterialIcons name="picture-as-pdf" size={22} color="#004b87" />}
+          <Text style={styles.anexoNome} numberOfLines={1}>{anexo.nome}</Text>
+          <TouchableOpacity style={styles.iconBtnDanger} onPress={remover}>
+            {Platform.OS !== 'web' && <MaterialIcons name="delete" size={18} color="#ef4444" />}
+            <Text style={styles.iconBtnDangerText}>Remover</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity style={styles.btnSecondary} onPress={() => escolherAnexo(definir)}>
+          {Platform.OS !== 'web' && <MaterialIcons name="attach-file" size={20} color="#004b87" />}
+          <Text style={styles.btnSecondaryText}>Adicionar {titulo} (PDF)</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.container}>
@@ -209,24 +250,10 @@ export default function Formulario() {
         )}
       </View>
 
-      <Text style={styles.sectionTitle}>Anexo I</Text>
-      <View style={styles.card}>
-        {anexo1 ? (
-          <View style={styles.anexoRow}>
-            {Platform.OS !== 'web' && <MaterialIcons name="picture-as-pdf" size={22} color="#004b87" />}
-            <Text style={styles.anexoNome} numberOfLines={1}>{anexo1.nome}</Text>
-            <TouchableOpacity style={styles.iconBtnDanger} onPress={() => setAnexo1(null)}>
-              {Platform.OS !== 'web' && <MaterialIcons name="delete" size={18} color="#ef4444" />}
-              <Text style={styles.iconBtnDangerText}>Remover</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <TouchableOpacity style={styles.btnSecondary} onPress={escolherAnexo1}>
-            {Platform.OS !== 'web' && <MaterialIcons name="attach-file" size={20} color="#004b87" />}
-            <Text style={styles.btnSecondaryText}>Adicionar Anexo I (PDF)</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      {renderAnexoBox('Anexo I', anexo1, setAnexo1, () => setAnexo1(null))}
+      {renderAnexoBox('Anexo II A', anexo2a, setAnexo2a, () => setAnexo2a(null))}
+      {renderAnexoBox('Anexo II B', anexo2b, setAnexo2b, () => setAnexo2b(null))}
+      {renderAnexoBox('Anexo II C', anexo2c, setAnexo2c, () => setAnexo2c(null))}
 
       <Text style={styles.sectionTitle}>Anexo III - Registo Fotográfico</Text>
       <View style={styles.actionsRow}>

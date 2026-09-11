@@ -35,6 +35,7 @@ export default function Historico({ navigation }: any) {
           regras_publicidade, confronto_documentos, controlo_visual, outras_verificacoes, 
           desconformidades_just, desconformidades_irreg, nome_tecnico, num_tecnico,
           nome_tecnico_2, num_tecnico_2, anexo1_url, anexo1_nome,
+          anexo2a_url, anexo2a_nome, anexo2b_url, anexo2b_nome, anexo2c_url, anexo2c_nome,
           fotos (id, descricao, foto_url, ordem)
         )
       `)
@@ -312,7 +313,9 @@ export default function Historico({ navigation }: any) {
         return doc.save();
       };
 
-      const temAnexo1 = !!operacao.anexo1_url;
+      // Anexos em PDF a fundir, por ordem (Anexo I, II A, II B, II C) — só entram os que existirem.
+      const urlsAnexos: string[] = [operacao.anexo1_url, operacao.anexo2a_url, operacao.anexo2b_url, operacao.anexo2c_url].filter(Boolean);
+      const temAnexos = urlsAnexos.length > 0;
 
       if (Platform.OS === 'web') {
         const medidor = document.createElement('iframe');
@@ -371,10 +374,10 @@ export default function Historico({ navigation }: any) {
           alturaFotosAcumulada += alturaLinha;
         }
 
-        if (temAnexo1) {
-          // Com Anexo I: não dá para usar window.print() (não expõe os bytes do PDF para fundir),
+        if (temAnexos) {
+          // Com anexos: não dá para usar window.print() (não expõe os bytes do PDF para fundir),
           // por isso cada página é capturada como imagem e o PDF final é montado com pdf-lib,
-          // com as páginas reais do Anexo I inseridas a seguir à página dos anexos.
+          // com as páginas reais dos anexos inseridas a seguir à página dos anexos.
           const html2canvas = (await import('html2canvas')).default;
 
           const frameCaptura = document.createElement('iframe');
@@ -406,12 +409,12 @@ export default function Historico({ navigation }: any) {
           }
           document.body.removeChild(frameCaptura);
 
-          const [relatorioBytes, anexoBytes, fotosBytes] = await Promise.all([
+          const [relatorioBytes, anexosBytes, fotosBytes] = await Promise.all([
             montarPdfDeImagens(paginasRelatorioJpg),
-            baixarBytes(operacao.anexo1_url),
+            Promise.all(urlsAnexos.map(baixarBytes)),
             montarPdfDeImagens(paginasFotosJpg),
           ]);
-          const finalBytes = await fundirPdfs([relatorioBytes, anexoBytes, fotosBytes]);
+          const finalBytes = await fundirPdfs([relatorioBytes, ...anexosBytes, fotosBytes]);
 
           const blob = new Blob([finalBytes as BlobPart], { type: 'application/pdf' });
           const url = URL.createObjectURL(blob);
@@ -445,21 +448,21 @@ export default function Historico({ navigation }: any) {
         }
         if (paginasFotosNativo.length === 0) paginasFotosNativo.push([]);
 
-        if (temAnexo1) {
-          // Com Anexo I: gera o relatório (até à página dos anexos) e as fotos como dois PDFs
-          // separados, com o Anexo I real fundido entre eles.
+        if (temAnexos) {
+          // Com anexos: gera o relatório (até à página dos anexos) e as fotos como dois PDFs
+          // separados, com os anexos reais fundidos entre eles.
           const corpoRelatorio = criarCabecalhoHtml() + blocosRelatorio.join('') + criarRodapeHtml();
           const corpoFotosNativo = montarPaginasFotos(paginasFotosNativo);
 
-          const [{ base64: relatorioBase64 }, { base64: fotosBase64 }, anexoBytes] = await Promise.all([
+          const [{ base64: relatorioBase64 }, { base64: fotosBase64 }, anexosBytes] = await Promise.all([
             Print.printToFileAsync({ html: montarDocumento(corpoRelatorio), base64: true }),
             Print.printToFileAsync({ html: montarDocumento(corpoFotosNativo), base64: true }),
-            baixarBytes(operacao.anexo1_url),
+            Promise.all(urlsAnexos.map(baixarBytes)),
           ]);
 
           const relatorioBytes = new Uint8Array(decode(relatorioBase64!));
           const fotosBytes = new Uint8Array(decode(fotosBase64!));
-          const finalBytes = await fundirPdfs([relatorioBytes, anexoBytes, fotosBytes]);
+          const finalBytes = await fundirPdfs([relatorioBytes, ...anexosBytes, fotosBytes]);
 
           const finalBuffer = finalBytes.buffer.slice(finalBytes.byteOffset, finalBytes.byteOffset + finalBytes.byteLength) as ArrayBuffer;
           const destino = FileSystem.cacheDirectory + `relatorio_${operacao.id}.pdf`;
