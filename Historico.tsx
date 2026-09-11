@@ -36,7 +36,7 @@ export default function Historico({ navigation }: any) {
           desconformidades_just, desconformidades_irreg, nome_tecnico, num_tecnico,
           nome_tecnico_2, num_tecnico_2, anexo1_url, anexo1_nome,
           anexo2a_url, anexo2a_nome, anexo2b_url, anexo2b_nome, anexo2c_url, anexo2c_nome,
-          fotos (id, descricao, foto_url, ordem)
+          fotos (id, descricao, foto_url, ordem, is_anexo4)
         )
       `)
       .order('created_at', { ascending: false });
@@ -76,11 +76,13 @@ export default function Historico({ navigation }: any) {
 
   const gerarPDF = async (agricultor: any, operacao: any) => {
     try {
-      const fotosOrdenadas = [...operacao.fotos].sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+      const fotosOrdenadas = [...operacao.fotos].filter((f: any) => !f.is_anexo4).sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+      const fotosAnexo4Ordenadas = [...operacao.fotos].filter((f: any) => f.is_anexo4).sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+      const temAnexoIV = fotosAnexo4Ordenadas.length > 0;
       const dataFormatada = operacao.data_visita ? operacao.data_visita.split('-').reverse().join('/') : '';
 
-      const criarFotoHtml = (foto: any, index: number, attrs: string = '') => `
-        <div class="photo-item"${attrs}>
+      const criarFotoHtml = (foto: any, index: number, attrs: string = '', classeExtra: string = '') => `
+        <div class="photo-item${classeExtra ? ' ' + classeExtra : ''}"${attrs}>
           <img src="${foto.foto_url}" />
           <div class="photo-caption"><strong>F${index + 1}- </strong>${foto.descricao}</div>
         </div>
@@ -118,8 +120,13 @@ export default function Historico({ navigation }: any) {
         .photo-item { width: 48%; margin-bottom: 25px; border: 2px solid #000; background-color: #fff !important; box-sizing: border-box; page-break-inside: avoid; float: left; overflow: hidden; }
         .photo-item:nth-child(odd) { clear: left; margin-right: 4%; }
         .photo-item img { width: 100%; height: 230px; object-fit: cover; display: block; border-bottom: 2px solid #000; box-sizing: border-box; }
+        .photo-item-grande { width: 100%; float: none; clear: both; }
+        .photo-item-grande:nth-child(odd), .photo-item-grande:nth-child(even) { margin-right: 0; }
+        .photo-item-grande img { height: 280px; object-fit: contain; }
         .photo-caption { padding: 10px; font-size: 11px; text-align: left; color: #000; }
         .pdf-page-frame { width: 210mm; height: 297mm; overflow: hidden; position: relative; background: #fff; box-sizing: border-box; }
+        .pagina-relatorio { display: flex; flex-direction: column; width: 210mm; height: 297mm; box-sizing: border-box; }
+        .pagina-relatorio-conteudo { flex: 1 1 auto; }
       `;
 
       const criarCabecalhoHtml = (alturaPx?: number) => `
@@ -149,7 +156,7 @@ export default function Historico({ navigation }: any) {
       `;
 
       // Cabeçalho de dados + título do registo fotográfico (repetido em TODAS as páginas de fotos)
-      const criarTopoFotosHtml = (attrs: string = '') => `
+      const criarTopoFotosHtml = (titulo: string, attrs: string = '') => `
         <div${attrs}>
           <div class="main-title">RELATÓRIO DE VERIFICAÇÃO FÍSICA NO LOCAL</div>
           <div class="gray-block-photos">
@@ -157,25 +164,28 @@ export default function Historico({ navigation }: any) {
             <div class="photo-input-col"><div class="photo-input-label">Data da Visita:</div><div class="photo-input-box">${dataFormatada}</div></div>
             <div class="photo-input-col"><div class="photo-input-label">NIFAP</div><div class="photo-input-box">${agricultor.nifap}</div></div>
           </div>
-          <div style="text-align: center; font-weight: bold; font-size: 14px; margin-bottom: 15px;">REGISTO FOTOGRÁFICO-ANEXO III</div>
+          <div style="text-align: center; font-weight: bold; font-size: 14px; margin-bottom: 15px;">${titulo}</div>
         </div>
       `;
 
-      // Uma página completa do registo fotográfico (logo + dados + título + fotos dessa página)
-      const criarPaginaFotosHtml = (indices: number[]) => `
+      const TITULO_ANEXO_III = 'REGISTO FOTOGRÁFICO-ANEXO III';
+      const TITULO_ANEXO_IV = 'ESQUEMA GERAL DOS INVESTIMENTOS REALIZADOS-ANEXO IV';
+
+      // Uma página completa de um registo fotográfico (logo + dados + título + fotos dessa página)
+      const criarPaginaFotosHtml = (titulo: string, fotosLista: any[], indices: number[], classeFoto: string = '') => `
         ${criarCabecalhoFotosHtml()}
         <div class="content-cell">
-          ${criarTopoFotosHtml()}
+          ${criarTopoFotosHtml(titulo)}
           <div class="photo-grid">
             ${indices.length > 0
-              ? indices.map(i => criarFotoHtml(fotosOrdenadas[i], i)).join('')
+              ? indices.map(i => criarFotoHtml(fotosLista[i], i, '', classeFoto)).join('')
               : '<p style="text-align:center; width:100%; color:#64748b;">Nenhuma foto registada.</p>'}
           </div>
         </div>
       `;
 
-      const montarPaginasFotos = (paginas: number[][]) =>
-        paginas.map((indices, idx) => (idx > 0 ? '<div style="page-break-before: always;"></div>' : '') + criarPaginaFotosHtml(indices)).join('');
+      const montarPaginasFotos = (titulo: string, fotosLista: any[], paginas: number[][], classeFoto: string = '') =>
+        paginas.map((indices, idx) => (idx > 0 ? '<div style="page-break-before: always;"></div>' : '') + criarPaginaFotosHtml(titulo, fotosLista, indices, classeFoto)).join('');
 
       const criarRodapeHtml = (alturaPx?: number) => `
         <div class="rodape" data-rodape${alturaPx ? ` style="height: ${alturaPx}px;"` : ''}>
@@ -245,9 +255,9 @@ export default function Historico({ navigation }: any) {
             <div class="label" style="margin-top: 10px; margin-bottom: 5px;">Montantes Contratualizados:</div>
             <div class="flex-row">
               <div style="display: flex; flex-direction: column; width: 120px;"><span class="label">Investimento Total:</span><span class="label-small">(Elegível Aprovado)</span></div>
-              <div class="input-box">${operacao.investimento_total || ''}</div>
+              <div class="input-box">${operacao.investimento_total ? `€ ${operacao.investimento_total}` : ''}</div>
               <div style="display: flex; flex-direction: column; width: 100px; margin-left: 15px;"><span class="label">Apoio Atribuído:</span><span class="label-small">(Despesa Pública)</span></div>
-              <div class="input-box">${operacao.apoio_atribuido || ''}</div>
+              <div class="input-box">${operacao.apoio_atribuido ? `€ ${operacao.apoio_atribuido}` : ''}</div>
             </div>
           </div>
         </div>`,
@@ -262,6 +272,16 @@ export default function Historico({ navigation }: any) {
 
         `<div class="content-cell"><div class="anexos">ANEXOS:<br><br>- ANEXO I &nbsp;&nbsp;&nbsp;- Adenda<br>- ANEXO II A - Verificação dos Investimentos Realizados<br>- ANEXO II B - Verificação do Parcelário e Ocupação Cultural<br>- ANEXO II C - Condicionantes<br>- ANEXO III &nbsp;&nbsp;- Registo Fotográfico<br>- ANEXO IV &nbsp;&nbsp;- Esquema geral dos investimentos realizados</div></div>`,
       ];
+
+      // Uma página do relatório (cabeçalho + conteúdo + rodapé), com o rodapé sempre colado ao
+      // fundo da página — mesmo quando o conteúdo dessa página não a preenche por completo.
+      const criarPaginaRelatorioHtml = (indices: number[], alturaCabecalhoPx?: number, alturaRodapePx?: number) => `
+        <div class="pagina-relatorio">
+          ${criarCabecalhoHtml(alturaCabecalhoPx)}
+          <div class="pagina-relatorio-conteudo">${indices.map(i => blocosRelatorio[i]).join('')}</div>
+          ${criarRodapeHtml(alturaRodapePx)}
+        </div>
+      `;
 
       const montarDocumento = (corpoHtml: string) => `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>${estilos}</style></head><body>${corpoHtml}</body></html>`;
 
@@ -313,6 +333,25 @@ export default function Historico({ navigation }: any) {
         return doc.save();
       };
 
+      // Paginação de fotos genérica (usada para o Anexo III, 2 fotos por linha, e para o Anexo IV,
+      // 1 foto por linha): o orçamento é gasto linha a linha, e nunca se excede o limite por página.
+      const calcularPaginasFotos = (alturasFotos: number[], orcamentoPx: number, maxPorPagina: number, porLinha: number = 2): number[][] => {
+        const MARGEM_FOTO_PX = 25; // .photo-item margin-bottom
+        const paginas: number[][] = [[]];
+        let acumulada = 0;
+        for (let i = 0; i < alturasFotos.length; i += porLinha) {
+          const alturaLinha = Math.max(...alturasFotos.slice(i, i + porLinha)) + MARGEM_FOTO_PX;
+          const ultima = paginas[paginas.length - 1];
+          const excedeOrcamento = acumulada + alturaLinha > orcamentoPx;
+          const excedeLimite = ultima.length >= maxPorPagina;
+          if ((excedeOrcamento || excedeLimite) && ultima.length > 0) { paginas.push([]); acumulada = 0; }
+          const atual = paginas[paginas.length - 1];
+          for (let j = i; j < Math.min(i + porLinha, alturasFotos.length); j++) atual.push(j);
+          acumulada += alturaLinha;
+        }
+        return paginas;
+      };
+
       // Anexos em PDF a fundir, por ordem (Anexo I, II A, II B, II C) — só entram os que existirem.
       const urlsAnexos: string[] = [operacao.anexo1_url, operacao.anexo2a_url, operacao.anexo2b_url, operacao.anexo2c_url].filter(Boolean);
       const temAnexos = urlsAnexos.length > 0;
@@ -326,7 +365,10 @@ export default function Historico({ navigation }: any) {
           criarCabecalhoHtml() + criarRodapeHtml()
           + blocosRelatorio.map((bloco, i) => bloco.replace('<div class="content-cell">', `<div class="content-cell" data-blk="${i}">`)).join('')
           + criarCabecalhoFotosHtml(' data-cabecalho-fotos')
-          + `<div class="content-cell">${criarTopoFotosHtml(' data-topo-fotos')}<div class="photo-grid">${fotosOrdenadas.map((f: any, i: number) => criarFotoHtml(f, i, ` data-foto="${i}"`)).join('')}</div></div>`;
+          + `<div class="content-cell">${criarTopoFotosHtml(TITULO_ANEXO_III, ' data-topo-fotos')}<div class="photo-grid">${fotosOrdenadas.map((f: any, i: number) => criarFotoHtml(f, i, ` data-foto="${i}"`)).join('')}</div></div>`
+          + (temAnexoIV
+            ? `<div class="content-cell">${criarTopoFotosHtml(TITULO_ANEXO_IV, ' data-topo-fotos-4')}<div class="photo-grid">${fotosAnexo4Ordenadas.map((f: any, i: number) => criarFotoHtml(f, i, ` data-foto-4="${i}"`, 'photo-item-grande')).join('')}</div></div>`
+            : '');
         medidor.contentDocument?.open(); medidor.contentDocument?.write(montarDocumento(corpoMedicao)); medidor.contentDocument?.close();
         await aguardarCarregamento(medidor);
 
@@ -337,6 +379,8 @@ export default function Historico({ navigation }: any) {
         const alturaCabFotosPx = Math.ceil(doc.querySelector('[data-cabecalho-fotos]')!.getBoundingClientRect().height) + 2;
         const alturaTopoFotosPx = Math.ceil(doc.querySelector('[data-topo-fotos]')!.getBoundingClientRect().height) + 2;
         const alturasFotos = Array.from(doc.querySelectorAll('[data-foto]')).map(el => (el as HTMLElement).getBoundingClientRect().height);
+        const alturaTopoFotos4Px = temAnexoIV ? Math.ceil(doc.querySelector('[data-topo-fotos-4]')!.getBoundingClientRect().height) + 2 : 0;
+        const alturasFotos4 = temAnexoIV ? Array.from(doc.querySelectorAll('[data-foto-4]')).map(el => (el as HTMLElement).getBoundingClientRect().height) : [];
         document.body.removeChild(medidor);
 
         const MM_PARA_PX = 96 / 25.4;
@@ -355,24 +399,11 @@ export default function Historico({ navigation }: any) {
         // Sempre que uma linha não cabe, abre-se nova página (que repete logo + dados + título).
         // Usa uma margem de segurança generosa porque a grelha de fotos não tem rodapé próprio.
         const ORCAMENTO_FOTOS_PX = (297 * MM_PARA_PX) - alturaCabFotosPx - alturaTopoFotosPx - (25 * MM_PARA_PX);
-        const MARGEM_FOTO_PX = 25; // .photo-item margin-bottom
-        const MAX_FOTOS_POR_PAGINA = 4; // limite de segurança: nunca tentar mais do que 2 linhas por página
+        const paginasFotos = calcularPaginasFotos(alturasFotos, ORCAMENTO_FOTOS_PX, 4);
 
-        const paginasFotos: number[][] = [[]];
-        let alturaFotosAcumulada = 0;
-        for (let i = 0; i < alturasFotos.length; i += 2) {
-          const alturaLinha = Math.max(alturasFotos[i], alturasFotos[i + 1] ?? 0) + MARGEM_FOTO_PX;
-          const ultima = paginasFotos[paginasFotos.length - 1];
-          const excedeOrcamento = alturaFotosAcumulada + alturaLinha > ORCAMENTO_FOTOS_PX;
-          const excedeLimite = ultima.length >= MAX_FOTOS_POR_PAGINA;
-          if ((excedeOrcamento || excedeLimite) && ultima.length > 0) {
-            paginasFotos.push([]); alturaFotosAcumulada = 0;
-          }
-          const atual = paginasFotos[paginasFotos.length - 1];
-          atual.push(i);
-          if (i + 1 < alturasFotos.length) atual.push(i + 1);
-          alturaFotosAcumulada += alturaLinha;
-        }
+        // Anexo IV: fotos maiores, no máximo 2 por página (1 linha).
+        const ORCAMENTO_FOTOS4_PX = (297 * MM_PARA_PX) - alturaCabFotosPx - alturaTopoFotos4Px - (25 * MM_PARA_PX);
+        const paginasFotos4 = temAnexoIV ? calcularPaginasFotos(alturasFotos4, ORCAMENTO_FOTOS4_PX, 2, 1) : [];
 
         if (temAnexos) {
           // Com anexos: não dá para usar window.print() (não expõe os bytes do PDF para fundir),
@@ -400,12 +431,14 @@ export default function Historico({ navigation }: any) {
 
           const paginasRelatorioJpg: Uint8Array[] = [];
           for (const indices of paginas) {
-            const corpoPagina = criarCabecalhoHtml(alturaCabecalhoPx) + indices.map(i => blocosRelatorio[i]).join('') + criarRodapeHtml(alturaRodapePx);
-            paginasRelatorioJpg.push(await capturarPaginaJpg(corpoPagina));
+            paginasRelatorioJpg.push(await capturarPaginaJpg(criarPaginaRelatorioHtml(indices, alturaCabecalhoPx, alturaRodapePx)));
           }
           const paginasFotosJpg: Uint8Array[] = [];
           for (const indices of paginasFotos) {
-            paginasFotosJpg.push(await capturarPaginaJpg(criarPaginaFotosHtml(indices)));
+            paginasFotosJpg.push(await capturarPaginaJpg(criarPaginaFotosHtml(TITULO_ANEXO_III, fotosOrdenadas, indices)));
+          }
+          for (const indices of paginasFotos4) {
+            paginasFotosJpg.push(await capturarPaginaJpg(criarPaginaFotosHtml(TITULO_ANEXO_IV, fotosAnexo4Ordenadas, indices, 'photo-item-grande')));
           }
           document.body.removeChild(frameCaptura);
 
@@ -427,9 +460,12 @@ export default function Historico({ navigation }: any) {
           let corpoFinal = '';
           paginas.forEach((indices, idx) => {
             if (idx > 0) corpoFinal += '<div style="page-break-before: always;"></div>';
-            corpoFinal += criarCabecalhoHtml(alturaCabecalhoPx) + indices.map(i => blocosRelatorio[i]).join('') + criarRodapeHtml(alturaRodapePx);
+            corpoFinal += criarPaginaRelatorioHtml(indices, alturaCabecalhoPx, alturaRodapePx);
           });
-          corpoFinal += '<div style="page-break-before: always;"></div>' + montarPaginasFotos(paginasFotos);
+          corpoFinal += '<div style="page-break-before: always;"></div>' + montarPaginasFotos(TITULO_ANEXO_III, fotosOrdenadas, paginasFotos);
+          if (temAnexoIV) {
+            corpoFinal += '<div style="page-break-before: always;"></div>' + montarPaginasFotos(TITULO_ANEXO_IV, fotosAnexo4Ordenadas, paginasFotos4, 'photo-item-grande');
+          }
 
           const iframe = document.createElement('iframe');
           iframe.style.visibility = 'hidden'; iframe.style.position = 'absolute'; iframe.style.left = '-9999px'; iframe.style.width = '210mm';
@@ -448,11 +484,22 @@ export default function Historico({ navigation }: any) {
         }
         if (paginasFotosNativo.length === 0) paginasFotosNativo.push([]);
 
+        // Anexo IV: fotos maiores, fixo em 2 por página (1 linha).
+        const FOTOS_POR_PAGINA_4 = 2;
+        const paginasFotos4Nativo: number[][] = [];
+        for (let i = 0; i < fotosAnexo4Ordenadas.length; i += FOTOS_POR_PAGINA_4) {
+          paginasFotos4Nativo.push(fotosAnexo4Ordenadas.slice(i, i + FOTOS_POR_PAGINA_4).map((_: any, j: number) => i + j));
+        }
+
+        let corpoFotosNativo = montarPaginasFotos(TITULO_ANEXO_III, fotosOrdenadas, paginasFotosNativo);
+        if (temAnexoIV) {
+          corpoFotosNativo += '<div style="page-break-before: always;"></div>' + montarPaginasFotos(TITULO_ANEXO_IV, fotosAnexo4Ordenadas, paginasFotos4Nativo, 'photo-item-grande');
+        }
+
         if (temAnexos) {
           // Com anexos: gera o relatório (até à página dos anexos) e as fotos como dois PDFs
           // separados, com os anexos reais fundidos entre eles.
           const corpoRelatorio = criarCabecalhoHtml() + blocosRelatorio.join('') + criarRodapeHtml();
-          const corpoFotosNativo = montarPaginasFotos(paginasFotosNativo);
 
           const [{ base64: relatorioBase64 }, { base64: fotosBase64 }, anexosBytes] = await Promise.all([
             Print.printToFileAsync({ html: montarDocumento(corpoRelatorio), base64: true }),
@@ -469,7 +516,7 @@ export default function Historico({ navigation }: any) {
           await FileSystem.writeAsStringAsync(destino, encode(finalBuffer), { encoding: 'base64' });
           await Sharing.shareAsync(destino, { UTI: '.pdf', mimeType: 'application/pdf' });
         } else {
-          const corpoNativo = criarCabecalhoHtml() + blocosRelatorio.join('') + criarRodapeHtml() + '<div style="page-break-before: always;"></div>' + montarPaginasFotos(paginasFotosNativo);
+          const corpoNativo = criarCabecalhoHtml() + blocosRelatorio.join('') + criarRodapeHtml() + '<div style="page-break-before: always;"></div>' + corpoFotosNativo;
           const { uri } = await Print.printToFileAsync({ html: montarDocumento(corpoNativo) });
           await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
         }

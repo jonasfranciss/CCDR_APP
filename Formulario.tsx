@@ -10,6 +10,44 @@ import { supabase } from './supabase';
 interface FotoData { uri: string; descricao: string; }
 interface AnexoData { uri: string; nome: string; }
 
+// Estado e ações para uma lista de fotos com descrição (usado no Anexo III e no Anexo IV).
+function useListaFotos() {
+  const [fotos, setFotos] = useState<FotoData[]>([]);
+
+  const adicionarCamera = async () => {
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+    if (!result.canceled) setFotos(f => [...f, { uri: result.assets[0].uri, descricao: '' }]);
+  };
+
+  const adicionarGaleria = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsMultipleSelection: true });
+    if (!result.canceled) {
+      const novasFotos = result.assets.map(asset => ({ uri: asset.uri, descricao: '' }));
+      setFotos(f => [...f, ...novasFotos]);
+    }
+  };
+
+  const mover = (index: number, direcao: 'cima' | 'baixo') => {
+    setFotos(f => {
+      if (direcao === 'cima' && index === 0) return f;
+      if (direcao === 'baixo' && index === f.length - 1) return f;
+      const novas = [...f];
+      const novaPosicao = direcao === 'cima' ? index - 1 : index + 1;
+      [novas[index], novas[novaPosicao]] = [novas[novaPosicao], novas[index]];
+      return novas;
+    });
+  };
+
+  const atualizarDescricao = (texto: string, index: number) => {
+    setFotos(f => f.map((foto, i) => i === index ? { ...foto, descricao: texto } : foto));
+  };
+
+  const remover = (index: number) => setFotos(f => f.filter((_, i) => i !== index));
+  const limpar = () => setFotos([]);
+
+  return { fotos, adicionarCamera, adicionarGaleria, mover, atualizarDescricao, remover, limpar };
+}
+
 export default function Formulario() {
   const [nifap, setNifap] = useState('');
   const [nOperacao, setNOperacao] = useState('');
@@ -38,7 +76,8 @@ export default function Formulario() {
   const [nomeTecnico2, setNomeTecnico2] = useState('');
   const [numTecnico2, setNumTecnico2] = useState('');
 
-  const [fotos, setFotos] = useState<FotoData[]>([]);
+  const anexo3Fotos = useListaFotos();
+  const anexo4Fotos = useListaFotos();
   const [anexo1, setAnexo1] = useState<AnexoData | null>(null);
   const [anexo2a, setAnexo2a] = useState<AnexoData | null>(null);
   const [anexo2b, setAnexo2b] = useState<AnexoData | null>(null);
@@ -52,32 +91,8 @@ export default function Formulario() {
     }
   };
 
-  const adicionarCamera = async () => {
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
-    if (!result.canceled) setFotos([...fotos, { uri: result.assets[0].uri, descricao: '' }]);
-  };
-
-  const adicionarGaleria = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsMultipleSelection: true });
-    if (!result.canceled) {
-      const novasFotos = result.assets.map(asset => ({ uri: asset.uri, descricao: '' }));
-      setFotos([...fotos, ...novasFotos]);
-    }
-  };
-
-  const moverFoto = (index: number, direcao: 'cima' | 'baixo') => {
-    if (direcao === 'cima' && index === 0) return;
-    if (direcao === 'baixo' && index === fotos.length - 1) return;
-    const novasFotos = [...fotos];
-    const novaPosicao = direcao === 'cima' ? index - 1 : index + 1;
-    [novasFotos[index], novasFotos[novaPosicao]] = [novasFotos[novaPosicao], novasFotos[index]];
-    setFotos(novasFotos);
-  };
-  const atualizarDescricao = (texto: string, index: number) => { const novasFotos = [...fotos]; novasFotos[index].descricao = texto; setFotos(novasFotos); };
-  const removerFoto = (index: number) => setFotos(fotos.filter((_, i) => i !== index));
-
   const guardarRelatorio = async () => {
-    if (!nifap || !nOperacao || fotos.length === 0) { alert('Preenche os dados obrigatórios e adiciona pelo menos uma fotografia.'); return; }
+    if (!nifap || !nOperacao || anexo3Fotos.fotos.length === 0) { alert('Preenche os dados obrigatórios e adiciona pelo menos uma fotografia.'); return; }
     setIsSubmitting(true);
     try {
       let nifapId;
@@ -101,20 +116,24 @@ export default function Formulario() {
       }]).select('id').single();
       if (errOp) throw new Error('Erro a criar Operação');
 
-      for (let i = 0; i < fotos.length; i++) {
-        const foto = fotos[i];
-        const nomeFicheiro = `${nifap}_${nOperacao}_${Date.now()}_${i}.jpg`;
-        if (Platform.OS === 'web') {
-          const response = await fetch(foto.uri);
-          const blob = await response.blob();
-          await supabase.storage.from('fotos_relatorio').upload(nomeFicheiro, blob, { contentType: 'image/jpeg' });
-        } else {
-          const base64 = await FileSystem.readAsStringAsync(foto.uri, { encoding: 'base64' });
-          await supabase.storage.from('fotos_relatorio').upload(nomeFicheiro, decode(base64), { contentType: 'image/jpeg' });
+      const enviarFotos = async (lista: FotoData[], isAnexo4: boolean) => {
+        for (let i = 0; i < lista.length; i++) {
+          const foto = lista[i];
+          const nomeFicheiro = `${nifap}_${nOperacao}_${isAnexo4 ? 'a4_' : ''}${Date.now()}_${i}.jpg`;
+          if (Platform.OS === 'web') {
+            const response = await fetch(foto.uri);
+            const blob = await response.blob();
+            await supabase.storage.from('fotos_relatorio').upload(nomeFicheiro, blob, { contentType: 'image/jpeg' });
+          } else {
+            const base64 = await FileSystem.readAsStringAsync(foto.uri, { encoding: 'base64' });
+            await supabase.storage.from('fotos_relatorio').upload(nomeFicheiro, decode(base64), { contentType: 'image/jpeg' });
+          }
+          const { data: urlData } = supabase.storage.from('fotos_relatorio').getPublicUrl(nomeFicheiro);
+          await supabase.from('fotos').insert([{ operacao_id: nOp.id, descricao: foto.descricao, foto_url: urlData.publicUrl, ordem: i, is_anexo4: isAnexo4 }]);
         }
-        const { data: urlData } = supabase.storage.from('fotos_relatorio').getPublicUrl(nomeFicheiro);
-        await supabase.from('fotos').insert([{ operacao_id: nOp.id, descricao: foto.descricao, foto_url: urlData.publicUrl, ordem: i }]);
-      }
+      };
+      await enviarFotos(anexo3Fotos.fotos, false);
+      await enviarFotos(anexo4Fotos.fotos, true);
 
       const enviarAnexo = async (anexo: AnexoData | null, sufixo: string): Promise<{ url: string; nome: string } | null> => {
         if (!anexo) return null;
@@ -147,7 +166,7 @@ export default function Formulario() {
       }
 
       alert('Registo guardado com sucesso!');
-      setNifap(''); setNOperacao(''); setFotos([]); setNomePromotor('');
+      setNifap(''); setNOperacao(''); anexo3Fotos.limpar(); anexo4Fotos.limpar(); setNomePromotor('');
       setAnexo1(null); setAnexo2a(null); setAnexo2b(null); setAnexo2c(null);
     } catch (error: any) { alert(error.message); } finally { setIsSubmitting(false); }
   };
@@ -173,6 +192,45 @@ export default function Formulario() {
         </TouchableOpacity>
       )}
     </View>
+  );
+
+  const renderListaFotos = (estado: ReturnType<typeof useListaFotos>) => (
+    <>
+      <View style={styles.actionsRow}>
+        <TouchableOpacity style={styles.btnPrimary} onPress={estado.adicionarCamera}>
+          {Platform.OS !== 'web' && <MaterialIcons name="photo-camera" size={22} color="#ffffff" />}
+          <Text style={styles.btnPrimaryText}>Tirar Foto</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.btnSecondary} onPress={estado.adicionarGaleria}>
+          {Platform.OS !== 'web' && <MaterialIcons name="photo-library" size={22} color="#004b87" />}
+          <Text style={styles.btnSecondaryText}>Galeria</Text>
+        </TouchableOpacity>
+      </View>
+
+      {estado.fotos.map((foto, index) => (
+        <View key={index} style={styles.fotoCard}>
+          <View style={styles.fotoHeader}><Text style={styles.fotoIndex}>F{index + 1}</Text></View>
+          <Image source={{ uri: foto.uri }} style={styles.imagem} />
+          <View style={styles.fotoContent}>
+            <TextInput style={[styles.fotoInput, webStyle]} value={foto.descricao} onChangeText={(text) => estado.atualizarDescricao(text, index)} multiline />
+            <View style={styles.fotoControls}>
+              <View style={styles.orderControls}>
+                <TouchableOpacity style={styles.iconBtn} onPress={() => estado.mover(index, 'cima')} disabled={index === 0}>
+                  {Platform.OS !== 'web' ? <MaterialIcons name="arrow-upward" size={20} color={index === 0 ? "#cbd5e1" : "#475569"} /> : <Text style={{fontWeight: 'bold', fontSize: 16, color: index === 0 ? "#cbd5e1" : "#475569"}}>↑</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.iconBtn} onPress={() => estado.mover(index, 'baixo')} disabled={index === estado.fotos.length - 1}>
+                  {Platform.OS !== 'web' ? <MaterialIcons name="arrow-downward" size={20} color={index === estado.fotos.length - 1 ? "#cbd5e1" : "#475569"} /> : <Text style={{fontWeight: 'bold', fontSize: 16, color: index === estado.fotos.length - 1 ? "#cbd5e1" : "#475569"}}>↓</Text>}
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity style={styles.iconBtnDanger} onPress={() => estado.remover(index)}>
+                {Platform.OS !== 'web' && <MaterialIcons name="delete" size={20} color="#ef4444" />}
+                <Text style={styles.iconBtnDangerText}>Remover</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      ))}
+    </>
   );
 
   return (
@@ -256,42 +314,12 @@ export default function Formulario() {
       {renderAnexoBox('Anexo II C', anexo2c, setAnexo2c, () => setAnexo2c(null))}
 
       <Text style={styles.sectionTitle}>Anexo III - Registo Fotográfico</Text>
-      <View style={styles.actionsRow}>
-        <TouchableOpacity style={styles.btnPrimary} onPress={adicionarCamera}>
-          {Platform.OS !== 'web' && <MaterialIcons name="photo-camera" size={22} color="#ffffff" />}
-          <Text style={styles.btnPrimaryText}>Tirar Foto</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.btnSecondary} onPress={adicionarGaleria}>
-          {Platform.OS !== 'web' && <MaterialIcons name="photo-library" size={22} color="#004b87" />}
-          <Text style={styles.btnSecondaryText}>Galeria</Text>
-        </TouchableOpacity>
-      </View>
+      {renderListaFotos(anexo3Fotos)}
 
-      {fotos.map((foto, index) => (
-        <View key={index} style={styles.fotoCard}>
-          <View style={styles.fotoHeader}><Text style={styles.fotoIndex}>F{index + 1}</Text></View>
-          <Image source={{ uri: foto.uri }} style={styles.imagem} />
-          <View style={styles.fotoContent}>
-            <TextInput style={[styles.fotoInput, webStyle]} value={foto.descricao} onChangeText={(text) => atualizarDescricao(text, index)} multiline />
-            <View style={styles.fotoControls}>
-              <View style={styles.orderControls}>
-                <TouchableOpacity style={styles.iconBtn} onPress={() => moverFoto(index, 'cima')} disabled={index === 0}>
-                  {Platform.OS !== 'web' ? <MaterialIcons name="arrow-upward" size={20} color={index === 0 ? "#cbd5e1" : "#475569"} /> : <Text style={{fontWeight: 'bold', fontSize: 16, color: index === 0 ? "#cbd5e1" : "#475569"}}>↑</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.iconBtn} onPress={() => moverFoto(index, 'baixo')} disabled={index === fotos.length - 1}>
-                  {Platform.OS !== 'web' ? <MaterialIcons name="arrow-downward" size={20} color={index === fotos.length - 1 ? "#cbd5e1" : "#475569"} /> : <Text style={{fontWeight: 'bold', fontSize: 16, color: index === fotos.length - 1 ? "#cbd5e1" : "#475569"}}>↓</Text>}
-                </TouchableOpacity>
-              </View>
-              <TouchableOpacity style={styles.iconBtnDanger} onPress={() => removerFoto(index)}>
-                {Platform.OS !== 'web' && <MaterialIcons name="delete" size={20} color="#ef4444" />}
-                <Text style={styles.iconBtnDangerText}>Remover</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      ))}
+      <Text style={styles.sectionTitle}>Anexo IV - Esquema Geral dos Investimentos Realizados (opcional)</Text>
+      {renderListaFotos(anexo4Fotos)}
 
-      {fotos.length > 0 && (
+      {anexo3Fotos.fotos.length > 0 && (
         <TouchableOpacity style={styles.btnSubmit} onPress={guardarRelatorio} disabled={isSubmitting}>
           {isSubmitting ? <ActivityIndicator color="white" /> : <Text style={styles.btnSubmitText}>Guardar Registo Completo</Text>}
         </TouchableOpacity>
